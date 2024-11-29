@@ -3,7 +3,7 @@
 
 This is the accompanying code repository for the paper Voss et al. (2025) - "Guiding Pro-Environmental Behaviour: Examining the Impact of Cognitive and Behavioural Interventions on Low-Emission Food Choices in Hospitality".
 
-The code contains the data and R code for all relevant analyses in the paper, including the supplementary material.
+The repository contains the data and R code for all relevant analyses in the paper, including the supplementary material.
 Data and code are published under the CC BY 4.0 license.
 
 
