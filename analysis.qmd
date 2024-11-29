@@ -1,0 +1,561 @@
+---
+title: "Statistical analysis for the paper 'Guiding Pro-Environmental Behaviour'"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    self-contained: true
+    code-fold: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#| message: false
+
+library(readxl)     # for read_excel()
+library(dplyr)      # data handling
+library(lubridate)  # datetime handling
+library(ggplot2)    # data visualization
+library(knitr)      # print tables
+library(kableExtra) # print tables
+
+# set global ggplot theme
+theme_set(theme_minimal())
+```
+
+
+# Data preparation
+
+## Main data for hotel 1 and hotel 2
+
+```{r}
+#| message: false
+
+# read the hotel data on aggregated level
+dat_hotel_agg <- readxl::read_excel("data/Hotel data.xlsx") %>% 
+  select(-"...9", -"...10", -"...11")
+
+# create a dataset on individual level
+dat <- data.frame(hotel        = character(),
+                  date         = character(),
+                  intervention = character(),
+                  meal_type    = character(),
+                  date_weekday = character(),
+                  date_weekend = character())
+for (row in 1:nrow(dat_hotel_agg)) {
+  n_veg    <- dat_hotel_agg$N_Vegetarian[row]
+  n_nonVeg <- dat_hotel_agg$`N_Non-Vegetarian`[row]
+  
+  dat_new <- data.frame(hotel        = paste("hotel", dat_hotel_agg$Hotel[row]),
+                        date         = dat_hotel_agg$Date[row] %>% as.character(),
+                        intervention = dat_hotel_agg$Experimental_Condition[row] %>% as.character(),
+                        meal_type    = c(rep("V", n_veg), rep("M", n_nonVeg)),
+                        date_weekday = dat_hotel_agg$Day[row] %>% as.character(),
+                        date_weekend = dat_hotel_agg$Weekend[row] %>% as.character())
+  dat <- dat %>% bind_rows(dat_new)
+}
+
+# further data preparation
+dat <- dat %>%
+  as_tibble() %>% 
+  mutate(hotel        = factor(hotel),
+         date         = lubridate::as_date(date, format = "%Y-%m-%d"),
+         intervention = case_when(intervention == "1" ~ "Default Group",
+                                  intervention == "2" ~ "Cognitive Intervention",
+                                  intervention == "3" ~ "Vegetarian Behavioural Intervention",
+                                  intervention == "4" ~ "Non-Vegetarian Behavioural Intervention",
+                                  TRUE                ~ NA_character_),
+         intervention = factor(intervention, levels = c("Default Group", "Cognitive Intervention",
+                                                        "Vegetarian Behavioural Intervention", "Non-Vegetarian Behavioural Intervention")),
+         meal_type    = factor(meal_type),
+         date_weekday = case_when(date_weekday == "1" ~ "Mo",
+                                  date_weekday == "2" ~ "Di",
+                                  date_weekday == "3" ~ "Mi",
+                                  date_weekday == "4" ~ "Do",
+                                  date_weekday == "5" ~ "Fr",
+                                  date_weekday == "6" ~ "Sa",
+                                  date_weekday == "7" ~ "So",
+                                  TRUE                ~ NA_character_),
+         date_weekday = factor(date_weekday, levels = c("Mo","Di","Mi","Do","Fr","Sa","So")),
+         date_weekend = case_when(date_weekend == "1" ~ "weekend",
+                                  date_weekend == "2" ~ "no weekend",
+                                  TRUE                ~ NA_character_),
+         date_weekend = factor(date_weekend))
+```
+
+
+# Description
+
+```{r}
+#| column: page
+
+# hotel
+table(dat$hotel, useNA = "always") %>% 
+  t() %>% kable(caption = "Distribution of hotels") %>% kable_styling()
+
+# date
+table(dat$hotel, dat$date, useNA = "always") %>% 
+  t() %>% kable(caption = "Distribution of dates with observations, by hotel") %>% kable_styling()
+
+# days
+table(dat$hotel, dat$date_weekday, useNA = "always") %>% 
+  t() %>% kable(caption = "Distribution of weekdays with observations, by hotel") %>% kable_styling()
+
+# weekend
+# note: we double checked, hotel 2 has no weekend observations
+table(dat$hotel, dat$date_weekend, useNA = "always") %>% 
+  t() %>% kable(caption = "Distribution of weekends by hotel (hotel 2 has no weekend observations") %>% kable_styling()
+table(dat$date_weekday, dat$date_weekend, useNA = "always") %>% 
+  t() %>% kable(caption = "Check if weekends are encoded correctly") %>% kable_styling()
+
+# intervention
+table(dat$hotel, dat$intervention, useNA = "always") %>% 
+  t() %>% kable(caption = "Distribution of interventions") %>% kable_styling()
+
+# meal_type
+table(dat$hotel, dat$meal_type, useNA = "always") %>% 
+  t() %>% kable(caption = "Distribution of ordered meals by hotel") %>% kable_styling()
+table(dat$intervention, dat$meal_type, useNA = "always") %>% 
+  t() %>% kable(caption = "Distribution of ordered meals by intervention") %>% kable_styling()
+```
+
+
+## Description of the ordered meal type per hotel and intervention
+
+```{r}
+#| message: false
+#| fig-width: 8
+#| fig-height: 3.5
+
+plot_dat <- dat %>% 
+  filter(!is.na(meal_type)) %>% 
+  mutate(hotel        = factor(hotel, levels = c("hotel 1", "hotel 2"), labels = c("Hotel 1", "Hotel 2")),
+         meal_type    = factor(meal_type, levels = c("V", "M"), labels = c("vegetarian", "meat-based")),
+         intervention = factor(intervention, levels = rev(levels(intervention))))
+
+plotLabels_dat <- plot_dat %>% 
+  group_by(hotel, intervention) %>% 
+  summarize(n_veg             = sum(meal_type == "vegetarian"),
+            n_total           = n(),
+            veg_share         = n_veg / n_total,
+            veg_share_se      = sqrt((veg_share * (1 - veg_share) / n_total)),
+            veg_share_CIlower = veg_share - qnorm(.975) * veg_share_se,
+            veg_share_CIupper = veg_share + qnorm(.975) * veg_share_se) %>% 
+  mutate(veg_share_CIlower = case_when(veg_share_CIlower < 0 ~ 0,
+                                       TRUE                  ~ veg_share_CIlower),
+         veg_share_label = case_when(intervention == "Default Group" ~ paste0(scales::percent(veg_share, accuracy = 1), " [",
+                                                                              scales::percent(veg_share_CIlower, accuracy = 1), ", ", 
+                                                                              scales::percent(veg_share_CIupper, accuracy = 1), "]\n(",
+                                                                              n_veg, " out of ", n_total, " orders)"),
+                                     TRUE                            ~ paste0(scales::percent(veg_share, accuracy = 1), " [",
+                                                                              scales::percent(veg_share_CIlower, accuracy = 1), ", ", 
+                                                                              scales::percent(veg_share_CIupper, accuracy = 1), "]\n(",
+                                                                              n_veg, " out of ", n_total, ")")))
+
+plot_dat %>% 
+  ggplot(aes(y = intervention)) +
+  geom_bar(aes(fill = meal_type), position = position_fill(reverse = TRUE)) +
+  geom_text(data = plotLabels_dat, aes(label = veg_share_label, x = veg_share),
+            hjust = -0.1, col = "dodgerblue4", size = 3) +
+  scale_fill_manual("meal type", values = c("dodgerblue3", "lightgray")) +
+  scale_x_continuous("Relative frequency [%]", labels = scales::label_percent()) +
+  facet_wrap(~ hotel) +
+  theme(axis.title.y       = element_blank(),
+        axis.title.x       = element_text(size = 9),
+        plot.background    = element_rect(fill = "white"),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        legend.position    = "bottom",
+        legend.title       = element_text(size = 9))
+# ggsave("results/Figure3_description.png", width = 8, height = 3.5)
+```
+
+
+# Model estimation
+
+We estimate two models to answer the hypotheses:
+
+1. One general model jointly comparing the two behavioural interventions with the cognitive intervention
+2. One detailed model comparing all three interventions with each other
+
+
+## Main model 1: Behavioural interventions vs. Cognitive intervention
+
+Estimation of a logistic regression model on individual level
+
+- response variable: binary indicator 'vegetarian vs. non-vegetarian choice'
+- main independent variable: intervention (with the two categories 'Cognitive Intervention' and 'Behavioural Intervention'; excluding the control group, also as of the low numbers of the control group in hotel 2)
+- main control variable: hotel indicator (binary), as an interaction with all other variables
+
+```{r}
+### data preparation
+# drop the control group
+dat_noControl <- dat %>%
+  filter(intervention != "Default Group") %>% 
+  mutate(intervention = droplevels(intervention))
+# create a new intervention variable joining the two behavioural interventions
+dat_noControl <- dat_noControl %>% 
+  mutate(intervention_grouped = factor(intervention,
+                                       levels = c("Cognitive Intervention",
+                                                  "Vegetarian Behavioural Intervention",
+                                                  "Non-Vegetarian Behavioural Intervention"),
+                                       labels = c("Cognitive Intervention",
+                                                  "Behavioural Interventions",
+                                                  "Behavioural Interventions")))
+
+### model estimation
+model1 <- glm(meal_type ~ hotel*intervention_grouped,
+              family = binomial(link = "logit"), data = dat_noControl)
+
+### summary table for the model
+# base: reestimate the model with 'hotel 2' as reference category, to easily
+#       retrieve the 'hotel 2'-specific intervention estimates and confidence intervals
+model1_ref2 <- dat_noControl %>% 
+  mutate(hotel = relevel(hotel, ref = "hotel 2")) %>% 
+  glm(meal_type ~ hotel*intervention_grouped,
+      family = binomial(link = "logit"), data = .)
+# retrieve the two coefficient tables
+coef1_tab1 <- summary(model1)$coefficients %>% 
+  as.data.frame() %>% 
+  mutate(parameter = row.names(.)) %>% 
+  filter(!grepl("hotel 2:", parameter)) %>% 
+  mutate(parameter = gsub("intervention_grouped", "hotel 1 intervention", parameter))
+row.names(coef1_tab1) <- NULL
+coef1_tab2 <- summary(model1_ref2)$coefficients %>%
+  as.data.frame() %>% 
+  mutate(parameter = row.names(.)) %>% 
+  filter(!grepl("hotel 1:", parameter),
+         grepl("intervention", parameter)) %>% 
+  mutate(parameter = gsub("intervention_grouped", "hotel 2 intervention", parameter))
+row.names(coef1_tab2) <- NULL
+# merge the two tables
+coef1_tab <- bind_rows(coef1_tab1, coef1_tab2)
+# final preparations
+coef1_tab <- coef1_tab %>% 
+  rename(coef   = Estimate,
+         se     = "Std. Error",
+         pvalue = "Pr(>|z|)") %>% 
+  mutate(coef_exp     = exp(coef),
+         se_exp       = exp(se),
+         CI_lower     = coef - qnorm(0.975) * se,
+         CI_upper     = coef + qnorm(0.975) * se,
+         CI_lower_exp = exp(CI_lower),
+         CI_upper_exp = exp(CI_upper)) %>% 
+  select(parameter, coef, se, coef_exp, se_exp, CI_lower_exp, CI_upper_exp, pvalue) %>% 
+  mutate(across(c(coef, se, coef_exp, se_exp, CI_lower_exp, CI_upper_exp), function(x) { round(x, 2) }),
+         pvalue    = round(pvalue, 4),
+         pvalue    = case_when(parameter == "(Intercept)" ~ "-",
+                               pvalue    <  0.0001        ~ "<0.0001",
+                               TRUE                       ~ as.character(pvalue)),
+         parameter = case_when(parameter == "(Intercept)"         ~ "intercept",
+                               parameter == "hotelhotel 2"        ~ "hotel 2",
+                               grepl("intervention", parameter)   ~ gsub("intervention", "intervention ", parameter),
+                               TRUE                               ~ parameter))
+
+coef1_tab %>% kable() %>% kable_styling()
+# write.csv(coef1_tab, file = "results/model1_results.csv", row.names = FALSE)
+```
+
+
+### Effect plot
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+
+# create a 'param_group' variable to categorize the effects in the plot
+coef1_tab_plot <- coef1_tab %>% 
+  filter(parameter != "intercept") %>% 
+  mutate(param_group = case_when(grepl("hotel 1 int", parameter) ~ "Interventions in Hotel 1",
+                                 grepl("hotel 2 int", parameter) ~ "Interventions in Hotel 2",
+                                 TRUE                            ~ "Hotel difference"),
+         param_group = factor(param_group),
+         parameter   = gsub("hotel 1 intervention ", "", parameter),
+         parameter   = gsub("hotel 2 intervention ", "", parameter),
+         parameter   = case_when(parameter == "hotel 2" ~ "Hotel 2",
+                                 TRUE                   ~ parameter),
+         parameter   = factor(parameter, levels = c("Hotel 2", "Cognitive Intervention",
+                                                    "Behavioural Interventions")))
+# plot
+ggplot(coef1_tab_plot, aes(x = parameter)) +
+  geom_hline(yintercept = 1, col = "gray30", lty = 2) +
+  geom_pointrange(aes(xmin = parameter, xmax = parameter, y = coef_exp,
+                      ymin = CI_lower_exp, ymax = CI_upper_exp, col = param_group),
+                  size = .8) +
+  facet_grid(~ param_group, scales = "free_x") +
+  scale_y_continuous("Odds Ratio on log2 scale", trans = "log2",
+                     breaks       = c(0.030375, 0.125, 0.5, 1, 2, 8, 32, 128),
+                     minor_breaks = c(0.0675, 0.25, 4, 16, 64, 256),
+                     labels       = c("0.03", "0.125", "0.5", "1", "2", "8", "32", "128")) +
+  theme(legend.position    = "none",
+        plot.background    = element_rect(fill = "white"),
+        strip.background   = element_rect(fill = "gray90", color = "transparent"),
+        panel.grid.major.x = element_blank(),
+        axis.title.x       = element_blank(),
+        axis.text.x        = element_text(angle = 45, hjust = 1))
+# ggsave("results/model1_effectPlot.png", width = 8, height = 5)
+```
+
+
+### Goodness of fit
+
+```{r}
+dispersion_parameter1 <- model1$deviance / model1$df.residual
+```
+
+Dispersion parameter: `r round(dispersion_parameter1, 2)`
+
+
+## Main model 2: Comparison of all three interventions
+
+Estimation of a logistic regression model, identical to model 1,
+with the only difference that the two behavioural intervention groups are analysed
+separately.
+
+
+```{r}
+### model estimation
+model2 <- glm(meal_type ~ hotel*intervention,
+              family = binomial(link = "logit"), data = dat_noControl)
+
+### summary table for the model
+# base: reestimate the model with 'hotel 2' as reference category, to easily
+#       retrieve the 'hotel 2'-specific intervention estimates and confidence intervals
+model2_ref2 <- dat_noControl %>% 
+  mutate(hotel = relevel(hotel, ref = "hotel 2")) %>% 
+  glm(meal_type ~ hotel*intervention,
+      family = binomial(link = "logit"), data = .)
+# retrieve the two coefficient tables
+coef2_tab1 <- summary(model2)$coefficients %>% 
+  as.data.frame() %>% 
+  mutate(parameter = row.names(.)) %>% 
+  filter(!grepl("hotel 2:", parameter)) %>% 
+  mutate(parameter = gsub("intervention", "hotel 1 intervention", parameter))
+row.names(coef2_tab1) <- NULL
+coef2_tab2 <- summary(model2_ref2)$coefficients %>%
+  as.data.frame() %>% 
+  mutate(parameter = row.names(.)) %>% 
+  filter(!grepl("hotel 1:", parameter),
+         grepl("intervention", parameter)) %>% 
+  mutate(parameter = gsub("intervention", "hotel 2 intervention", parameter))
+row.names(coef2_tab2) <- NULL
+# merge the two tables
+coef2_tab <- bind_rows(coef2_tab1, coef2_tab2)
+# final preparations
+coef2_tab <- coef2_tab %>% 
+  rename(coef   = Estimate,
+         se     = "Std. Error",
+         pvalue = "Pr(>|z|)") %>% 
+  mutate(coef_exp     = exp(coef),
+         se_exp       = exp(se),
+         CI_lower     = coef - qnorm(0.975) * se,
+         CI_upper     = coef + qnorm(0.975) * se,
+         CI_lower_exp = exp(CI_lower),
+         CI_upper_exp = exp(CI_upper)) %>% 
+  select(parameter, coef, se, coef_exp, se_exp, CI_lower_exp, CI_upper_exp, pvalue) %>% 
+  mutate(across(c(coef, se, coef_exp, se_exp, CI_lower_exp, CI_upper_exp), function(x) { round(x, 2) }),
+         pvalue    = round(pvalue, 4),
+         pvalue    = case_when(parameter == "(Intercept)" ~ "-",
+                               pvalue    <  0.0001        ~ "<0.0001",
+                               TRUE                       ~ as.character(pvalue)),
+         parameter = case_when(parameter == "(Intercept)"         ~ "intercept",
+                               parameter == "hotelhotel 2"        ~ "hotel 2",
+                               grepl("intervention", parameter)   ~ gsub("intervention", "intervention ", parameter),
+                               TRUE                               ~ parameter))
+
+coef2_tab %>% kable() %>% kable_styling()
+# write.csv(coef2_tab, file = "results/model2_results.csv", row.names = FALSE)
+```
+
+
+### Effect plot
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+
+# create a 'param_group' variable to categorize the effects in the plot
+coef2_tab_plot <- coef2_tab %>% 
+  filter(parameter != "intercept") %>% 
+  mutate(param_group = case_when(grepl("hotel 1 int", parameter) ~ "Interventions in Hotel 1",
+                                 grepl("hotel 2 int", parameter) ~ "Interventions in Hotel 2",
+                                 TRUE                            ~ "Hotel difference"),
+         param_group = factor(param_group),
+         parameter   = gsub("hotel 1 intervention ", "", parameter),
+         parameter   = gsub("hotel 2 intervention ", "", parameter),
+         parameter   = case_when(parameter == "hotel 2" ~ "Hotel 2",
+                                 TRUE                   ~ parameter),
+         parameter   = factor(parameter, levels = c("Hotel 2", "Cognitive Intervention",
+                                                    "Vegetarian Behavioural Intervention",
+                                                    "Non-Vegetarian Behavioural Intervention")))
+# plot
+ggplot(coef2_tab_plot, aes(x = parameter)) +
+  geom_hline(yintercept = 1, col = "gray30", lty = 2) +
+  geom_pointrange(aes(xmin = parameter, xmax = parameter, y = coef_exp,
+                      ymin = CI_lower_exp, ymax = CI_upper_exp, col = param_group),
+                  size = .8) +
+  facet_grid(~ param_group, scales = "free_x") +
+  scale_y_continuous("Odds Ratio on log2 scale", trans = "log2",
+                     breaks       = c(0.030375, 0.125, 0.5, 1, 2, 8, 32, 128),
+                     minor_breaks = c(0.0675, 0.25, 4, 16, 64, 256),
+                     labels       = c("0.03", "0.125", "0.5", "1", "2", "8", "32", "128")) +
+  theme(legend.position    = "none",
+        plot.background    = element_rect(fill = "white"),
+        strip.background   = element_rect(fill = "gray90", color = "transparent"),
+        panel.grid.major.x = element_blank(),
+        axis.title.x       = element_blank(),
+        axis.text.x        = element_text(angle = 45, hjust = 1))
+# ggsave("results/Figure4_model2_effectPlot.png", width = 8, height = 5)
+```
+
+
+### Goodness of fit
+
+```{r}
+dispersion_parameter2 <- model2$deviance / model2$df.residual
+```
+
+Dispersion parameter: `r round(dispersion_parameter2, 2)`
+
+
+
+# Answering the hypotheses
+
+## H1: Behavioural > cognitive
+
+**Hypothesis**  
+A behavioural intervention is more effective than a cognitive intervention in increasing vegetarian orders in a hotel restaurant setting.
+
+```{r}
+coef1_tab %>% 
+  filter(grepl("Intervention", parameter)) %>% 
+  select(-coef, -se, -se_exp) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+**Result**  
+Only in hotel 2, the behavioural intervention led to a significant increase in vegetarian orders, compared to the cognitive intervention.  
+In hotel 1, the chance for a guest to order a vegetarian meal was overall increased by `r paste0(100 * (coef1_tab$coef_exp[coef1_tab$parameter == "hotel 1 intervention Behavioural Interventions"] - 1), "%")` (p = `r coef1_tab$pvalue[coef1_tab$parameter == "hotel 1 intervention Behavioural Interventions"]`) if the guest underwent a behavioural instead of the cognitive intervention.  
+In hotel 2, this chance was increased by `r paste0(100 * (coef1_tab$coef_exp[coef1_tab$parameter == "hotel 2 intervention Behavioural Interventions"] - 1), "%")` (p = `r coef1_tab$pvalue[coef1_tab$parameter == "hotel 2 intervention Behavioural Interventions"]`).
+
+
+## H2a: Veg. behavioural > cognitive
+
+**Hypothesis**  
+The Vegetarian Intervention is more effective than the Cognitive Intervention in increasing
+vegetarian orders in a hotel restaurant setting.
+
+```{r}
+coef2_tab %>% 
+  filter(grepl(" Vegetarian", parameter)) %>% 
+  select(-coef, -se, -se_exp) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+**Result**  
+Only in hotel 2, the vegetarian behavioural intervention led to a significant increase in vegetarian orders, compared to the cognitive intervention.  
+In hotel 1, the chance for a guest to order a vegetarian meal was increased by `r paste0(100 * (coef2_tab$coef_exp[coef2_tab$parameter == "hotel 1 intervention Vegetarian Behavioural Intervention"] - 1), "%")` (p = `r coef2_tab$pvalue[coef2_tab$parameter == "hotel 1 intervention Vegetarian Behavioural Intervention"]`) if the guest underwent the vegetarian behavioural intervention instead of the cognitive intervention.  
+In hotel 2, this chance was increased by `r paste0(100 * (coef2_tab$coef_exp[coef2_tab$parameter == "hotel 2 intervention Vegetarian Behavioural Intervention"] - 1), "%")` (p = `r coef2_tab$pvalue[coef2_tab$parameter == "hotel 2 intervention Vegetarian Behavioural Intervention"]`).
+
+
+## H2b: Non-Veg. behavioural < cognitive
+
+**Hypothesis**  
+The Non-Vegetarian Intervention is less effective than the Cognitive Intervention in increasing
+vegetarian orders in a hotel restaurant setting.
+
+```{r}
+coef2_tab %>% 
+  filter(grepl("Non-Vegetarian", parameter)) %>% 
+  select(-coef, -se, -se_exp) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+**Result**  
+No, in both hotels the non-vegetarian behavioural intervention didn't lead to a decrease in vegetarian orders, but led to a significant increase in vegetarian orders, compared to the cognitive intervention.  
+In hotel 1, the chance for a guest to order a vegetarian meal was increased by `r paste0(100 * (coef2_tab$coef_exp[coef2_tab$parameter == "hotel 1 intervention Non-Vegetarian Behavioural Intervention"] - 1), "%")` (p = `r coef2_tab$pvalue[coef2_tab$parameter == "hotel 1 intervention Non-Vegetarian Behavioural Intervention"]`) if the guest underwent the non-vegetarian behavioural intervention instead of the cognitive intervention.  
+In hotel 2, this chance was increased by `r paste0(100 * (coef2_tab$coef_exp[coef2_tab$parameter == "hotel 2 intervention Non-Vegetarian Behavioural Intervention"] - 1), "%")` (p = `r coef2_tab$pvalue[coef2_tab$parameter == "hotel 2 intervention Non-Vegetarian Behavioural Intervention"]`).
+
+
+## Additionally: Hotel difference?
+
+**Additional question**  
+Is there a significant difference between the two hotels regarding the assocation structure between the interventions and the response?
+
+**Approach**  
+Estimate model 2 (the one comparing all three intervention groups) once without the hotel effect and perform a likelihood ratio test.
+
+```{r}
+# model estimation
+model2_noHotel <- glm(meal_type ~ intervention,
+                      family = binomial(link = "logit"), data = dat_noControl)
+
+model2_anova <- anova(model2, model2_noHotel, test = "LRT")
+```
+
+**Result**  
+Yes, there is a significant difference between the association structures in the two hotels (p = `r round(model2_anova$'Pr(>Chi)'[2], 4)`).
+
+
+
+# CO2 savings in hotel 2
+
+Based on our sample (for all covered days we observed all ordered dinner meals)
+we estimate the **yearly dinner CO2 emissions** of hotel 2, once based on the default
+group and once based on the vegetarian behavioural intervention group.
+
+Assumptions:
+
+- hotel 2 is a conference center, only opened on weekdays (dinner is served there
+Monday to Friday)
+- since only dinner is freely chosen by the guests we focus solely on the dinner CO2 emissions
+- we assume that hotel 2 is opened the whole 52 weeks in a year
+- a non-vegetarian dinner meal in hotel 2 has an average CO2 footprint of 2.9kg
+- a vegetarian dinner meal in hotel 2 has an average CO2 footprint of 1.7kg
+
+
+```{r}
+# base information
+dat_hotel2     <- dat %>% filter(hotel == "hotel 2")
+n_days         <- dat_hotel2$date %>% unique() %>% length()
+n_mealsPerDay  <- nrow(dat_hotel2) / n_days
+n_mealsPerYear <- n_mealsPerDay * 5 * 52
+
+# meal orders
+mealOrders_default <- dat_hotel2 %>% 
+  filter(intervention == "Default Group") %>% 
+  pull(meal_type) %>% 
+  table() %>% 
+  prop.table()
+mealOrders_intervention <- dat_hotel2 %>% 
+  filter(intervention == "Vegetarian Behavioural Intervention") %>% 
+  pull(meal_type) %>% 
+  table() %>% 
+  prop.table()
+
+# CO2 emissions
+CO2_kg_default <- unname(n_mealsPerYear * mealOrders_default["M"] * 2.9 + 
+                           n_mealsPerYear * mealOrders_default["V"] * 1.7)
+CO2_kg_intervention <- unname(n_mealsPerYear * mealOrders_intervention["M"] * 2.9 + 
+                                n_mealsPerYear * mealOrders_intervention["V"] * 1.7)
+```
+
+Based on our `r n_days` observed days in hotel 2 and its on average `r n_mealsPerDay` dinner
+meals ordered per day we estimate that per year (5 days per one of the 52 weeks)
+`r n_mealsPerYear` dinner meals are ordered in hotel 2.
+
+Assuming the application of no intervention (i.e. based on the **default group**) we would
+assume that on average `r round(n_mealsPerYear * mealOrders_default["M"], 2)` (`r paste0(round(100 * mealOrders_default["M"], 1), "%")`) dinner meals per
+year are non-vegetarian and `r round(n_mealsPerYear * mealOrders_default["V"], 2)` (`r paste0(round(100 * mealOrders_default["V"], 1), "%")`) are vegetarian,
+resulting in a total CO2 footprimt of **`r round(CO2_kg_default / 1000, 1)` tons**.
+
+Assuming the application of the **vegetarian behavioural intervention** we would
+assume that on average `r round(n_mealsPerYear * mealOrders_intervention["M"], 2)` (`r paste0(round(100 * mealOrders_intervention["M"], 1), "%")`) dinner meals per
+year are non-vegetarian and `r round(n_mealsPerYear * mealOrders_intervention["V"], 2)` (`r paste0(round(100 * mealOrders_intervention["V"], 1), "%")`) are vegetarian,
+resulting in a total CO2 footprimt of **`r round(CO2_kg_intervention / 1000, 1)` tons**.
+
+Accordingly the vegetarian behavioural intervention could **save `r paste0(round(100 * (1 - (CO2_kg_intervention / CO2_kg_default))), "%")` of dinner CO2 emissions**.

@@ -1,0 +1,7 @@
+"parameter","coef","se","coef_exp","se_exp","CI_lower_exp","CI_upper_exp","pvalue"
+"intercept",-1.29,0.24,0.28,1.27,0.17,0.44,"-"
+"hotel 2",-1.75,0.76,0.17,2.14,0.04,0.77,"0.0215"
+"hotel 1 intervention Vegetarian Behavioural Intervention",0.38,0.32,1.46,1.37,0.79,2.72,"0.2296"
+"hotel 1 intervention Non-Vegetarian Behavioural Intervention",0.22,0.33,1.25,1.4,0.65,2.4,"0.5114"
+"hotel 2 intervention Vegetarian Behavioural Intervention",2.35,0.79,10.5,2.21,2.21,49.8,"0.0031"
+"hotel 2 intervention Non-Vegetarian Behavioural Intervention",1.77,0.78,5.88,2.19,1.26,27.35,"0.0239"

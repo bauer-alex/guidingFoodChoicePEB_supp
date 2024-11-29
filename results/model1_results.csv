@@ -1,0 +1,5 @@
+"parameter","coef","se","coef_exp","se_exp","CI_lower_exp","CI_upper_exp","pvalue"
+"intercept",-1.29,0.24,0.27,1.27,0.17,0.44,"-"
+"hotel 2",-1.75,0.76,0.17,2.14,0.04,0.77,"0.0215"
+"hotel 1 intervention Behavioural Interventions",0.31,0.29,1.36,1.33,0.78,2.38,"0.2811"
+"hotel 2 intervention Behavioural Interventions",2.02,0.76,7.54,2.13,1.71,33.2,"0.0076"
